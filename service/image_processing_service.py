@@ -1,18 +1,17 @@
 import os
-
-import networkx as nx
+import json
 import torch
 import torch.nn.functional as F
 from PIL import Image
-from torchvision import transforms, models
+from torchvision import transforms
+import networkx as nx
+import timm
 
 
-def analyze_and_graph_images(folder_path):
-    # Check if we have a CUDA-enabled GPU
+def analyze_and_graph_images(folder_path, json_path):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Load a pre-trained ResNet model
-    model = models.resnet50(pretrained=True)
+    model = timm.create_model('vit_large_patch16_224', pretrained=True)
     model = model.to(device)
     model.eval()
 
@@ -27,32 +26,34 @@ def analyze_and_graph_images(folder_path):
         )
     ])
 
-    # Initialize an empty graph
+    with open(json_path, 'r') as j:
+        id_to_labels = json.load(j)
+
     G = nx.Graph()
 
-    # Classify each image and add it to a graph
     for img_name in os.listdir(folder_path):
-        # Open image
         image = Image.open(os.path.join(folder_path, img_name))
 
-        # Apply transformations
         image_tensor = transform(image).unsqueeze(0).to(device)
 
-        # Get the model output
         output = model(image_tensor)
         softmax_output = F.softmax(output, dim=1)
         predicted_probs, predicted_classes = torch.max(softmax_output, 1)
         predict_prob = predicted_probs.item()
         predict_class = predicted_classes.item()
 
-        # Add node with image name, class and probability as properties
-        G.add_node(img_name, class_label=predict_class, prediction_probability=predict_prob)
+        if predict_prob < 0.1:
+            continue
 
-    # Add edges if images have the same class label
+        label_names = id_to_labels[str(predict_class)]
+        primary_label_name = label_names.split(",")[0]
+
+        G.add_node(img_name, class_label=primary_label_name, prediction_probability=predict_prob)
+
     for node1, data1 in G.nodes(data=True):
         for node2, data2 in G.nodes(data=True):
             if node1 != node2 and data1['class_label'] == data2['class_label']:
-                # For now, we set the edge weight as the average of two prediction probabilities
-                G.add_edge(node1, node2, weight=(data1['prediction_probability'] + data2['prediction_probability']) / 2)
+                avg_probability = (data1['prediction_probability'] + data2['prediction_probability']) / 2
+                G.add_edge(node1, node2, weight=avg_probability)
 
     return G

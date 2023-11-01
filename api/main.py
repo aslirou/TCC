@@ -1,19 +1,29 @@
 import glob
 from os import listdir
 
-import cv2
 import networkx as nx
 import torch
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from ..service.image_processing_service import analyze_and_graph_images
 
 app = FastAPI()
+origins = [
+    "http://localhost:3000",
+]
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 state = {
     "home_return": {
         "message": "none",
-        "folder": "TCC/images"
+        "folder": "back/images"
     },
     "model": None,
     "count": 0,
@@ -61,10 +71,9 @@ async def create_graph():
     images = jpgs + jpegs + pngs + webps
     images.reverse()
     for img in images[:150]:
-        # img_name = img[len(img_folder):
-        # global home_return].replace("\\", "/")
 
-        result = model(img, size=1024)  # múltiplo de 32
+
+        result = model(img, size=1024)
 
         tags = result.pandas().xyxy[0][['name']].groupby("name").value_counts()
         ind = images.index(img)
@@ -82,7 +91,7 @@ async def create_graph():
 
             tag_dict[tag_name].append(tag_img_json)
 
-            DG.add_edge(tag_name, img)  # ligando nome da classe identificada com o nome do arquivo
+            DG.add_edge(tag_name, img)
             if tag_name == 'person':
                 if tag_quant == 2:
                     DG.add_edge('pair', img)
@@ -100,20 +109,9 @@ async def create_graph():
     return tag_dict
 
 
-def prepare_img(image_path: str, transform):
-    """
-    Prepare your images here by loading and transforming into tensors
-    """
-    img_array = cv2.imread(image_path)
-    img_array = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)  # Convert from BGR to RGB
-    img_tensor = transform(img_array)  # Now use the transform function
-    return img_tensor
-
-
 @app.get("/analyze_images/")
 def analyze_images(folder_path: str):
-    graph = analyze_and_graph_images(folder_path)
-    # Convert the graph structure into dictionary for jsonify it
+    graph = analyze_and_graph_images(folder_path,'C:\\Users\\aslir\\Documents\\Faculdade\\TCC\\back\\json\\imagenet1000.json')
     graph_dict = {
         "nodes": [{
             "id": node,
