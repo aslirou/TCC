@@ -1,12 +1,14 @@
 import glob
+import json
 from os import listdir
+from typing import Optional
 
 import networkx as nx
 import torch
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from ..service.image_processing_service import analyze_and_graph_images
+from ..service.image_processing_service import analyze_images
 
 app = FastAPI()
 origins = [
@@ -20,107 +22,39 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-state = {
-    "home_return": {
-        "message": "none",
-        "folder": "back/images"
-    },
-    "model": None,
-    "count": 0,
-    "tag_dict": {}
-}
-DG = nx.DiGraph()
 
 
 @app.on_event("startup")
 async def startup_event():
-    model = torch.hub.load('ultralytics/yolov5', 'yolov5l6', pretrained=True, device='cpu')
-    state['model'] = model
-    if state["home_return"]['message'] == "none":
-        state["count"] += 1
-        state["home_return"] = {
-            'message': "hello vorldo!",
-            'folder': '',
-            'count': state["count"]
-        }
+    print("Analisando Imagens")
+    analyze_images("C:\\Users\\aslir\\Documents\\Faculdade\\TCC\\front\\image-analysis\\public\\images")
+    print("Imagens Analisadas!")
 
 
-@app.put('/')
-async def update_folder(folder_path: str):
-    folder_contents = listdir(folder_path)
-    state["home_return"] = {
-        'message': 'Loaded!',
-        'folder': folder_path,
-        'contents': folder_contents
-    }
-    return state["home_return"]
+@app.get("/get_images_by_class/")
+def get_images_by_class(class_label: Optional[str] = None):
+    data = []
+    if class_label:
+        with open('C:\\Users\\aslir\\Documents\\Faculdade\\TCC\\back\\json\\results.json', 'r') as file:
+            json_data = json.load(file)
+
+            for node in json_data['nodes']:
+                if node["class_label"] == class_label:
+                    data.append(node)
+    return data
 
 
-@app.get('/tags/')
-async def create_graph():
-    global model
-    global home_return
-    global tag_dict
-    tag_dict = {}
-    path = home_return["folder"]
-    jpgs = glob.glob(path + '/**/*.jpg', recursive=True)
-    pngs = glob.glob(path + '/**/*.png', recursive=True)
-    jpegs = glob.glob(path + '/**/*.jpeg', recursive=True)
-    webps = glob.glob(path + '/**/*.webp', recursive=True)
+@app.get("/get_distinct_classes/")
+def get_distinct_classes():
+    class_set = set()  # a set data structure to hold unique classes
 
-    images = jpgs + jpegs + pngs + webps
-    images.reverse()
-    for img in images[:150]:
+    # Open JSON file and read data
+    with open('C:\\Users\\aslir\\Documents\\Faculdade\\TCC\\back\\json\\results.json', 'r') as file:
+        json_data = json.load(file)
 
+        # Loop over each node and add their class_label to the class_set
+        for node in json_data['nodes']:
+            class_set.add(node["class_label"])
 
-        result = model(img, size=1024)
-
-        tags = result.pandas().xyxy[0][['name']].groupby("name").value_counts()
-        ind = images.index(img)
-        for j in range(len(tags)):
-            tag_name = tags.index[j]
-            tag_quant = tags.iloc[j]
-
-            tag_img_json = {
-                "image": str(img),
-                "idents": int(tag_quant),
-                "trust": "TBD"
-            }
-            if tag_name not in tag_dict.keys():
-                tag_dict[tag_name] = []
-
-            tag_dict[tag_name].append(tag_img_json)
-
-            DG.add_edge(tag_name, img)
-            if tag_name == 'person':
-                if tag_quant == 2:
-                    DG.add_edge('pair', img)
-                elif tag_quant == 3:
-                    DG.add_edge('trio', img)
-                if tag_quant > 3:
-                    DG.add_edge('group', img)
-            if tag_name == 'cat' or tag_name == 'dog':
-                DG.add_edge('pets', img)
-
-        if len(tags) == 0:
-            DG.add_node(img)
-        print(f"{ind}/{len(images)} - processing!")
-
-    return tag_dict
-
-
-@app.get("/analyze_images/")
-def analyze_images(folder_path: str):
-    graph = analyze_and_graph_images(folder_path,'C:\\Users\\aslir\\Documents\\Faculdade\\TCC\\back\\json\\imagenet1000.json')
-    graph_dict = {
-        "nodes": [{
-            "id": node,
-            **attr_dict
-        } for node, attr_dict in graph.nodes(data=True)],
-        "edges": [{
-            "source": source,
-            "target": target,
-            **attr_dict
-        } for source, target, attr_dict in graph.edges(data=True)]
-    }
-    return graph_dict
+    # Convert the set to a list and return it
+    return list(class_set)
